@@ -79,6 +79,44 @@ def test_render_docx_rejects_duplicate_output_names(monkeypatch, tmp_path: Path)
     assert not hasattr(fake_template, "doc")
 
 
+@pytest.mark.parametrize("invalid_name", [
+    "A/B.docx", "A\\B.docx", "A*.docx", "A?.docx", "A:B.docx",
+    'A"B.docx', "A<B.docx", "A>B.docx", "A|B.docx", "A\x00.docx",
+    "A\nB.docx", "CON.docx", "lpt1.docx", "report.docx.", "report.docx ",
+    "", ".", "..",
+])
+def test_render_docx_rejects_invalid_names_before_side_effects(
+    monkeypatch, tmp_path, invalid_name,
+):
+    create_output = Mock(return_value=tmp_path)
+    open_template = Mock(return_value=FakeTemplate())
+    monkeypatch.setattr(render, "_open_template", open_template)
+
+    with pytest.raises(ValueError, match="ERR_OUTPUT_PATH") as exc_info:
+        render.render_docx(
+            [{"name": "valid.docx"}, {"name": invalid_name}],
+            tmp_path / "template.docx",
+            create_output,
+            filename=lambda record: record["name"],
+        )
+
+    assert str(exc_info.value).isascii()
+    create_output.assert_not_called()
+    open_template.assert_not_called()
+
+
+def test_render_docx_preserves_valid_unicode_filename(monkeypatch, tmp_path):
+    fake_template = FakeTemplate()
+    monkeypatch.setattr(render, "_open_template", lambda template: fake_template)
+
+    render.render_docx(
+        {"CN": "上海公司（分部）"}, tmp_path / "template.docx", tmp_path,
+        filename=lambda record: f"{record['CN']}.docx",
+    )
+
+    assert fake_template.doc.saved == [tmp_path / "上海公司（分部）.docx"]
+
+
 def test_open_template_wraps_permission_error(monkeypatch, tmp_path: Path):
     template = tmp_path / "locked.docx"
     template.write_text("template")

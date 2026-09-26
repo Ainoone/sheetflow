@@ -30,6 +30,7 @@ from datetime import datetime
 from functools import wraps
 import logging
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from zipfile import ZipFile, ZIP_DEFLATED
 
 from .user_errors import (
@@ -239,15 +240,21 @@ def _zip_file(
         - 压缩成功后删除原文件
         - 如果不含扩展名的完整文件名符合 date_format，会移动到对应年份目录
         - 所有操作成功后才删除原文件
-        - 如果目标文件已存在会被覆盖
+        - 先写临时归档，成功后替换目标；归档失败时保留已有目标文件
         - 若删除原文件失败，函数返回 False，已生成或移动的压缩包可能保留
     """
     archive = file_path.with_suffix('.zip')
+    temporary_archive = None
 
     try:
-        # 先写入归档；只有归档和移动完成后才会删除源文件。
+        # 与目标放在同一文件系统，写入失败只清理本次临时文件。
+        with NamedTemporaryFile(
+            dir=file_path.parent, prefix='.sheetflow-', suffix='.zip', delete=False
+        ) as temporary:
+            temporary_archive = Path(temporary.name)
+
         with ZipFile(
-            archive,
+            temporary_archive,
             'w',
             compression=ZIP_DEFLATED,
             compresslevel=compress_level
@@ -264,9 +271,10 @@ def _zip_file(
 
             target = new_directory / archive.name
 
-            archive.replace(target)
-            archive = target  # 后续异常清理必须指向移动后的归档。
-            logger.debug(f"已移动到年份目录: {target}")
+            archive = target
+
+        temporary_archive.replace(archive)
+        temporary_archive = None
 
         # 最后删除源文件，确保前述归档操作均已完成。
         file_path.unlink()
@@ -282,13 +290,14 @@ def _zip_file(
         return False
     except Exception as e:
         logger.error(f"压缩文件时发生错误 {file_path}: {e}")
-        # 尽力清理当前归档路径；清理失败仍保留本次处理失败的返回值。
-        if archive.exists():
-            try:
-                archive.unlink()
-            except Exception:
-                pass
         return False
+    finally:
+        # 不删除已有或已完成的正式归档；清理失败不替换原始处理结果。
+        if temporary_archive is not None:
+            try:
+                temporary_archive.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                logger.warning(f"无法清理临时归档 {temporary_archive}: {cleanup_error}")
 
 
 def _extract_year_from_filename(

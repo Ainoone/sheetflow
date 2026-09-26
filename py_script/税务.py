@@ -4,7 +4,7 @@
 支持普通税务模板渲染和个税压缩包两种模式；普通 Word 模板会在创建输出目录前校验。
 """
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -58,15 +58,17 @@ def main() -> None:
         generate_personal_income_tax(named_data, periods, output_dir)
     else:
         template_path = require_template(template_name)
-        output_dir = create_output_dir_for_workbook(wb)
-        _render_periodic_tax_docx(named_data, periods, template_path, output_dir)
+        _render_periodic_tax_docx(
+            named_data, periods, template_path,
+            lambda: create_output_dir_for_workbook(wb),
+        )
 
 
 def _render_periodic_tax_docx(
     named_data: dict[str, Any],
     periods: Iterable[tuple[date, date]],
     template_path: Path,
-    output_dir: Path,
+    output_dir: Path | Callable[[], Path],
 ) -> None:
     """按时间区间渲染普通税务 Word 文档。
 
@@ -74,7 +76,7 @@ def _render_periodic_tax_docx(
         named_data: 当前工作表命名区域读取出的业务字段。
         periods: 已切分好的时间区间，每项可解包为 (start, end)。
         template_path: 已在创建输出目录前校验通过的 Word 模板路径。
-        output_dir: 本次运行的输出目录。
+        output_dir: 本次运行的输出目录，或文件名预检通过后调用的目录创建函数。
     """
     records = (
         {**named_data, 'start': start, 'end': end}

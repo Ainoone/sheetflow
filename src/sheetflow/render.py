@@ -13,7 +13,7 @@
 
 import contextlib
 import logging
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Generator, Iterable
 
 from docxtpl import DocxTemplate
@@ -126,7 +126,7 @@ def render_docx(
     Raises:
         FileNotFoundError: 模板文件不存在(ERR_FILE_NOT_FOUND)。
         ValueError: 模板路径不是 .docx 文件(ERR_TEMPLATE_TYPE)，路径不是文件
-            (ERR_NOT_A_FILE)，或生成路径逃出输出目录/与本批次已有路径冲突
+            (ERR_NOT_A_FILE)，或文件名无效、生成路径逃出输出目录/与本批次已有路径冲突
             (ERR_OUTPUT_PATH)。
         RuntimeError: 模板文件无权限读取(ERR_PERMISSION_DENIED)。
         KeyError: filename 所需的键在记录中不存在
@@ -155,6 +155,21 @@ def render_docx(
     generated_name_keys: set[str] = set()
     for record in records:
         generated_name = filename(record)
+        # 输出为纯文件名；统一按 Windows 规则预检，避免保存时才失败或静默改名。
+        if (
+            not isinstance(generated_name, str)
+            or not generated_name
+            or generated_name.endswith((".", " "))
+            or any(char in '<>:"/\\|?*' or ord(char) < 32 for char in generated_name)
+            or PureWindowsPath(generated_name).is_reserved()
+        ):
+            raise ValueError(
+                format_user_error(
+                    ERR_OUTPUT_PATH,
+                    f"Invalid output filename: {ascii_safe(generated_name)}",
+                    f"输出文件名无效：{generated_name}",
+                )
+            )
         generated_name_key = generated_name.casefold()
         if generated_name_key in generated_name_keys:
             raise ValueError(

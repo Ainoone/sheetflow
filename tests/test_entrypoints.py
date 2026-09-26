@@ -137,6 +137,33 @@ def test_tax_entrypoint_resolves_word_template_before_output_side_effects(monkey
     create_output.assert_not_called()
 
 
+def test_tax_entrypoint_rejects_invalid_filename_before_creating_directory(
+    monkeypatch, tmp_path,
+):
+    module = _load_script("税务.py")
+    main_globals = module["main"].__wrapped__.__globals__
+    workbook = SimpleNamespace(sheets=SimpleNamespace(active=SimpleNamespace(name="Input")))
+    create_output = Mock(return_value=tmp_path)
+    monkeypatch.setattr(main_globals["xw"].Book, "caller", lambda: workbook)
+    monkeypatch.setitem(
+        main_globals, "NamedRangeDict",
+        lambda sheet: SimpleNamespace(data={
+            "Template": "企业所得税", "CN": "A/B公司",
+            "start": date(2024, 1, 1), "end": date(2024, 2, 29), "freq": "M",
+        }),
+    )
+    monkeypatch.setitem(
+        main_globals, "require_template", lambda *args: tmp_path / "template.docx",
+    )
+    monkeypatch.setitem(main_globals, "create_output_dir_for_workbook", create_output)
+
+    with pytest.raises(ValueError, match="ERR_OUTPUT_PATH") as exc_info:
+        module["main"]()
+
+    assert str(exc_info.value).isascii()
+    create_output.assert_not_called()
+
+
 class FakeRange:
     def __init__(self, should_fail=False):
         self.should_fail = should_fail
