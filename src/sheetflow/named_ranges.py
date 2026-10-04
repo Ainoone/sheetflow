@@ -156,7 +156,7 @@ class NamedRangeDict:
 
 def _as_config_list(value) -> list:
     """将 xlwings 的单单元格标量和多单元格列表统一为列表。"""
-    if not value:
+    if value is None:
         return []
     # xlwings 对单单元格返回标量；统一包装避免把 "CN" 按字符拆分。
     return list(always_iterable(value))
@@ -177,7 +177,7 @@ def build_named_range_map(namedrange_dict: dict) -> dict:
         dict: {名称: 地址} 映射，已过滤 None 值
 
     Raises:
-        ValueError: Named 和 Range 列表长度不匹配，或存在不区分大小写的重复名称
+        ValueError: Named 和 Range 列表长度不匹配、名称不是字符串，或存在不区分大小写的重复名称
             (ERR_NAMED_RANGE_MAP)。
 
     Examples:
@@ -205,19 +205,26 @@ def build_named_range_map(namedrange_dict: dict) -> dict:
         if name is None or addr is None:
             continue
 
-        if isinstance(name, str):
-            normalized_name = name.casefold()
-            previous = seen_names.get(normalized_name)
-            if previous is not None:
-                raise ValueError(
-                    format_user_error(
-                        ERR_NAMED_RANGE_MAP,
-                        "Duplicate named ranges are not allowed; "
-                        f"names={ascii_safe(previous)}, {ascii_safe(name)}",
-                        f"命名区域名称重复：{previous}、{name}",
-                    )
+        if not isinstance(name, str):
+            raise ValueError(
+                format_user_error(
+                    ERR_NAMED_RANGE_MAP,
+                    f"Named range names must be strings; name={ascii_safe(name)}",
+                    f"命名区域名称必须为文本：{name}",
                 )
-            seen_names[normalized_name] = name
+            )
+        normalized_name = name.casefold()
+        previous = seen_names.get(normalized_name)
+        if previous is not None:
+            raise ValueError(
+                format_user_error(
+                    ERR_NAMED_RANGE_MAP,
+                    "Duplicate named ranges are not allowed; "
+                    f"names={ascii_safe(previous)}, {ascii_safe(name)}",
+                    f"命名区域名称重复：{previous}、{name}",
+                )
+            )
+        seen_names[normalized_name] = name
 
         result[name] = addr
 
@@ -358,7 +365,7 @@ def create_named_ranges_from_dict(
             - 'failed': 创建失败的名称列表
 
     Raises:
-        ValueError: Named 和 Range 列表长度不匹配，或存在重复名称
+        ValueError: Named 和 Range 列表长度不匹配、名称不是字符串，或存在重复名称
             (ERR_NAMED_RANGE_MAP，由 build_named_range_map 抛出)。
         RuntimeError: 覆盖已有命名区域时，新定义创建失败且旧定义也无法恢复
             (ERR_NAMED_RANGE_RESTORE_FAILED，由 create_sheet_named_ranges 抛出)。

@@ -11,6 +11,7 @@
 """
 
 from datetime import date
+import logging
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -18,7 +19,9 @@ import xlwings as xw
 
 from .search import search_template_file_cached
 from .autozip import auto_zip
-from .user_errors import ERR_TEMPLATE_NOT_FOUND, ascii_safe, format_user_error
+from .user_errors import ERR_OUTPUT_PATH, ERR_TEMPLATE_NOT_FOUND, ascii_safe, format_user_error
+
+logger = logging.getLogger(__name__)
 
 TEMPLATE_NAMES = {2018: '2018', 2019: '2019'}
 
@@ -35,7 +38,8 @@ def generate_personal_income_tax(
         data: 公共数据字典（来自命名区域），如 CC、CN、IDN 等。每个键都会被
             直接传给 `sht.range(key)`，因此必须对应个税 .xls 模板中的命名区域
             或单元格地址。
-        periods: 时间段可迭代对象，每个元素可解包为 (start, end)
+        periods: 时间段可迭代对象，每个元素可解包为 (start, end)。
+            会在启动 Excel 前物化并校验；同批次的开始年月必须唯一。
         output_dir: 输出目录，调用方需确保已创建且专用于本次调用；装饰器会处理
             该目录直接包含的所有非 .zip 文件
 
@@ -43,6 +47,7 @@ def generate_personal_income_tax(
         输出目录路径（经 @auto_zip 装饰器后处理——压缩 .xls 为 .zip 并删除原文件）
 
     Raises:
+        ValueError: 同批次周期生成重复输出文件名(ERR_OUTPUT_PATH)。
         FileNotFoundError: 模板文件不存在(ERR_TEMPLATE_NOT_FOUND)。
         RuntimeError: 批量压缩失败(ERR_ARCHIVE_PARTIAL)，或 Excel 处理失败。
 
@@ -54,7 +59,19 @@ def generate_personal_income_tax(
         - year < 2019  → 2018.xls(旧个税)
         - year >= 2019 → 2019.xls(新个税)
     """
-    contexts = ({**data, 'start': s, 'end': e} for s, e in periods)
+    contexts = [{**data, 'start': s, 'end': e} for s, e in periods]
+    output_names: set[str] = set()
+    for context in contexts:
+        name = f"{context['start'].year}_{context['start'].month:02}.xls"
+        if name in output_names:
+            raise ValueError(
+                format_user_error(
+                    ERR_OUTPUT_PATH,
+                    f"Duplicate period output filename: {name}",
+                    f"多个周期对应同一个输出文件：{name}",
+                )
+            )
+        output_names.add(name)
     generated_paths: list[Path] = []
 
     try:
@@ -90,7 +107,15 @@ def generate_personal_income_tax(
                         sht.range(key).value = value
 
                     wb.save(output_path)
-                finally:
+                except BaseException:
+                    # 清理失败只能记日志，不能替换正在传播的写入/保存异常。
+                    try:
+                        wb.close()
+                    except Exception:
+                        logger.warning("Failed to close workbook after generation error", exc_info=True)
+                    raise
+                else:
+                    # 没有先前异常时，关闭失败仍应作为本次失败向上传播。
                     wb.close()
     except Exception:
         for path in generated_paths:

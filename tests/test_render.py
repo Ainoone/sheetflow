@@ -12,7 +12,7 @@ class FakeDoc:
         self.rendered = []
         self.saved = []
 
-    def render(self, record):
+    def render(self, record, *, autoescape=False):
         self.rendered.append(record)
 
     def save(self, path):
@@ -141,7 +141,7 @@ class SavePermissionTemplate:
     def __init__(self, path):
         self.path = path
 
-    def render(self, record):
+    def render(self, record, *, autoescape=False):
         pass
 
     def save(self, path):

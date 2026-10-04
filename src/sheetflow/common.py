@@ -13,6 +13,7 @@ from .smart_path_manager import SmartPathManager
 # 保留既有 ``sheetflow.common`` 导入路径，实际实现只由 user_errors 维护。
 from .user_errors import (
     ERROR_PREFIX,
+    ERR_INVALID_PATH,
     ERR_MISSING_NAMED_RANGE,
     ERR_OUTPUT_DIR,
     ERR_RUN_MAIN_FAILED,
@@ -142,7 +143,7 @@ def create_output_dir_for_workbook(workbook: Any) -> Path:
     """根据工作簿所在目录创建本次运行的输出目录。
 
     Args:
-        workbook: xlwings 工作簿对象，需提供 fullname 属性。
+        workbook: xlwings 工作簿对象，fullname 需为已保存工作簿的绝对路径。
 
     Returns:
         SmartPathManager 创建的输出目录路径。
@@ -151,8 +152,27 @@ def create_output_dir_for_workbook(workbook: Any) -> Path:
         RuntimeError: 无法创建输出目录。
         ValueError: 工作簿所在目录无效。
     """
-    workbook_dir = Path(workbook.fullname).parent
-    output_dir = SmartPathManager(workbook_dir).mkdir_if_needed()
+    fullname = workbook.fullname
+    if not isinstance(fullname, (str, Path)) or not Path(fullname).is_absolute():
+        raise ValueError(
+            format_user_error(
+                ERR_INVALID_PATH,
+                f"Workbook must have an absolute saved path; fullname={ascii_safe(fullname)}",
+                "请先保存工作簿，再创建输出目录。",
+            )
+        )
+    workbook_dir = Path(fullname).parent
+    try:
+        output_dir = SmartPathManager(workbook_dir).mkdir_if_needed()
+    except OSError as exc:
+        raise RuntimeError(
+            format_user_error(
+                ERR_OUTPUT_DIR,
+                f"Unable to create output directory; workbook_dir={ascii_safe(workbook_dir)}; "
+                f"error={ascii_safe(exc)}",
+                f"无法创建输出目录：{exc}",
+            )
+        ) from exc
     if output_dir is None:
         raise RuntimeError(
             format_user_error(

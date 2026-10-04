@@ -23,6 +23,8 @@ from sheetflow import (
     run_main,
 )
 
+from sheetflow.user_errors import ERR_OUTPUT_PATH, format_user_error
+
 PERSONAL_INCOME_TAX_PACKAGE = '个税压缩包'
 PERIOD_KEYS = ('start', 'end', 'freq')
 
@@ -40,7 +42,8 @@ def main() -> None:
             或无法创建输出目录(ERR_OUTPUT_DIR)。
         FileNotFoundError: Template 指定的模板文件不存在(ERR_TEMPLATE_NOT_FOUND)。
         TypeError: start 或 end 不是支持的日期类型。
-        ValueError: freq 不是支持的时间切分频率，或日期元组无效。
+        ValueError: freq 不是支持的时间切分频率、日期元组无效，或 Word 分支的
+            CN 不是非空公司名称(ERR_OUTPUT_PATH)。
         KeyError: 文件名生成或模板渲染所需字段缺失。
     """
     wb = xw.Book.caller()
@@ -78,6 +81,16 @@ def _render_periodic_tax_docx(
         template_path: 已在创建输出目录前校验通过的 Word 模板路径。
         output_dir: 本次运行的输出目录，或文件名预检通过后调用的目录创建函数。
     """
+    company_name = named_data.get('CN')
+    if not isinstance(company_name, str) or not company_name.strip():
+        raise ValueError(
+            format_user_error(
+                ERR_OUTPUT_PATH,
+                "CN must be a non-empty company name for the output filename",
+                "生成文件名前，CN 必须填写非空的公司名称。",
+            )
+        )
+
     records = (
         {**named_data, 'start': start, 'end': end}
         for start, end in periods
@@ -86,5 +99,5 @@ def _render_periodic_tax_docx(
         records,
         template_path,
         output_dir,
-        filename=lambda m: f"{str(m['CN'])[:6]}_{m['end'].year}年{m['end'].month:02}月.docx",
+        filename=lambda m: f"{company_name[:6]}_{m['end'].year}年{m['end'].month:02}月.docx",
     )

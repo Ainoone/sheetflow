@@ -136,6 +136,9 @@ class SmartPathManager:
                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
                     raw_path, _ = winreg.QueryValueEx(key, "Desktop")
                 desktop = Path(os.path.expandvars(raw_path)).expanduser()
+                if not desktop.is_absolute():
+                    logger.warning("Windows desktop path is not absolute: %r", raw_path)
+                    return None
             except (ImportError, OSError, TypeError) as exc:
                 logger.warning(f"无法读取 Windows 桌面路径: {exc}")
                 return None

@@ -13,6 +13,7 @@
 
 import contextlib
 import logging
+from io import BytesIO
 from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Generator, Iterable
 
@@ -85,7 +86,9 @@ def _open_template(path: str | Path) -> Generator[DocxTemplate, None, None]:
         )
 
     try:
-        tpl = DocxTemplate(full_path)
+        # docxtpl 延迟读取；先读取模板快照，使权限错误归类准确，
+        # 同一批次的重复 render 也始终从相同的原模板字节重新加载。
+        tpl = DocxTemplate(BytesIO(full_path.read_bytes()))
     except PermissionError:
         logger.error(f"无权限读取文件: {full_path}")
         raise RuntimeError(
@@ -99,7 +102,7 @@ def _open_template(path: str | Path) -> Generator[DocxTemplate, None, None]:
         logger.error(f"打开模板失败: {full_path}, 错误: {e}")
         raise
 
-    # 只转换模板构造阶段的读取错误；render/save 异常保留原始原因和目标路径。
+    # 只转换模板读取/构造错误；render/save 异常保留原始原因和目标路径。
     logger.debug(f"已打开模板: {full_path}")
     yield tpl
 
@@ -134,6 +137,7 @@ def render_docx(
     Note:
         - 会先物化记录并生成本批次全部文件名。若 output_dir 是延迟创建函数，文件名
           生成和直接重复错误会在创建目录前暴露；完整路径会在写文件前统一校验。
+        - 普通文本启用 XML 自动转义；同批次复用模板字节快照。
         - 实际模板渲染和保存仍按顺序执行，并非事务；此阶段后续记录失败时，先前
           已保存的文档会保留。
 
@@ -201,7 +205,7 @@ def render_docx(
 
     with _open_template(template) as doc:
         for record, path in prepared:
-            doc.render(record)
+            doc.render(record, autoescape=True)
             doc.save(path)
             logger.info(f"已保存: {path}")
 

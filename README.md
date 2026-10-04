@@ -89,7 +89,7 @@ sheetflow/
 
 `namedrange.xlsx → namedrange.main → build_named_range_map → create_sheet_named_ranges → 保存输入工作簿`
 
-配置表提供 `Named`、`Range`、`Sheet_Name`。前两项组成“名称 → 地址”映射，第三项指定目标工作表。名称与地址数量必须一致，名称按不区分大小写检查重复。
+配置表提供 `Named`、`Range`、`Sheet_Name`。前两项组成“名称 → 地址”映射，第三项指定目标工作表。名称与地址数量必须一致，非空名称必须是文本，名称按不区分大小写检查重复。
 
 覆盖已有名称时，新定义创建失败会尝试恢复原定义。批量创建不是事务：部分成功的更改可能留在 Excel 内存中，但入口只在全部成功后保存；任何失败都会报告错误。
 
@@ -116,7 +116,7 @@ sheetflow/
 └── 2019/2019_01.zip         # 内含 2019_01.xls
 ```
 
-税务入口会先校验日期与频率。Word 分支还会在创建目录前预检模板及文件名；个税分支在 Excel 生成过程中逐周期定位对应模板。
+税务入口会先校验日期与频率。Word 分支还会在创建目录前预检模板、非空文本公司名 CN 及文件名；个税分支会在启动 Excel 前检查周期开始年月不重复，再在生成过程中逐周期定位对应模板。
 
 ### 4. Excel 报表填充
 
@@ -190,13 +190,13 @@ uv run xlwings addin install
 
 `Template` 填写不含扩展名和路径分隔符的纯模板名，例如 `企业所得税`。搜索从**当前安装包内**的 `Template/` 目录递归进行，源码布局下对应 `src/sheetflow/Template/`；按完整文件名精确匹配，不把通配符解释为搜索表达式。
 
-调用方根据业务选择 `.docx`、`.xlsx` 或 `.xls`。Word 模板使用 `{{ 字段名 }}` 等 docxtpl 占位符；Excel 模板字段由 xlwings 的 `sheet.range(key)` 定位。
+调用方根据业务选择 `.docx`、`.xlsx` 或 `.xls`。Word 模板使用 `{{ 字段名 }}` 等 docxtpl 占位符，普通文本启用 XML 自动转义；Excel 模板字段由 xlwings 的 `sheet.range(key)` 定位。Word 同批次从一次读取的模板字节快照重复渲染，各记录不会沿用上条正文。
 
 缓存接口最多保存 128 组成功结果；找不到模板的结果不缓存，已缓存路径失效时清除缓存并重搜。因此运行中新增或恢复的模板可被后续调用发现。
 
 ### 输出位置与失败后的状态
 
-`SmartPathManager` 创建本次运行的时间戳目录。通常以输入工作簿所在目录为基础；直接子项达到默认阈值 5 时优先使用系统桌面。子项包含文件与目录，但忽略 `~$` 开头的 Excel 临时文件。Windows 使用实际桌面路径；桌面无法解析或不存在时留在工作簿目录。时间戳重名时尝试分钟及序号后缀。
+`SmartPathManager` 创建本次运行的时间戳目录。通常以输入工作簿所在目录为基础；直接子项达到默认阈值 5 时优先使用系统桌面。子项包含文件与目录，但忽略 `~$` 开头的 Excel 临时文件。Windows 使用实际桌面路径；桌面为空、不是绝对路径、无法解析或不存在时留在工作簿目录。工作簿 fullname 不是绝对路径时拒绝创建输出；目录权限或磁盘错误统一报告 ERR_OUTPUT_DIR。时间戳重名时尝试分钟及序号后缀。
 
 Word 输出名按 Windows 规则检查非法字符、路径分隔符、保留名称及结尾空格或句点；同批次文件名按大小写不敏感检查重复，并验证解析后的路径没有逃出输出目录。
 
@@ -210,15 +210,14 @@ Word 输出名按 Windows 规则检查非法字符、路径分隔符、保留名
 
 `user_errors.py` 是错误码与文本格式的统一定义处。Run main 入口返回带 `ERR_*` 前缀的 ASCII-safe 文本，并在 `CN_ESCAPED:` 后附带转义后的中文说明。已有错误码保持原样，其他异常由 `run_main` 包装为 `ERR_RUN_MAIN_FAILED`。
 
-当前已在真实 Excel Run main 链路确认、尚未修复的两项限制：
+此前发现的 Word 特殊字符丢失和模板读取错误归类问题已修复：普通文本启用 XML 自动转义；模板在渲染前读取为字节快照，读取权限错误报告 ERR_PERMISSION_DENIED，输出保存错误保留原始原因。真实 docxtpl 回归测试覆盖两条记录、正文、页眉、表格和 RichText；2026-10-04 已通过真实 Excel Run main 验证工商两条记录及税务两个月份，生成文件中的 `&`、`<`、`>` 保留完整，记录与期间没有混用。
 
-- **Word 特殊字符可能丢失**：渲染尚未启用 XML 自动转义，字段中的 `&`、`<` 等字符可能导致正文变化。例如文件名可为 `A&B.docx`，正文企业名却变成 `A`。文件生成成功不代表内容完整。
-- **模板读取错误可能归类不准**：docxtpl 延迟到渲染阶段才读取模板，读取受限时可能得到 `ERR_RUN_MAIN_FAILED`，而非专用的 `ERR_PERMISSION_DENIED`。
+个税写入或保存失败后，即使关闭工作簿也失败，仍传播原始生成异常并记录关闭失败；仅关闭失败时仍按失败处理。
 
 | 错误码 | 含义 |
 | --- | --- |
 | `ERR_MISSING_NAMED_RANGE` | 缺少必需命名区域 |
-| `ERR_NAMED_RANGE_MAP` | Named/Range 长度不一致或名称重复 |
+| `ERR_NAMED_RANGE_MAP` | Named/Range 长度不一致、名称不是文本或名称重复 |
 | `ERR_NAMED_RANGE_PARTIAL` | 命名区域批量创建部分失败，入口未保存工作簿 |
 | `ERR_NAMED_RANGE_RESTORE_FAILED` | 命名区域覆盖失败且旧定义恢复失败 |
 | `ERR_TEMPLATE_NOT_FOUND` | 找不到模板 |
@@ -228,16 +227,16 @@ Word 输出名按 Windows 规则检查非法字符、路径分隔符、保留名
 | `ERR_FILE_NOT_FOUND` | 指定文件不存在 |
 | `ERR_NOT_A_FILE` | 指定路径不是文件 |
 | `ERR_SEARCH_PATH` | 模板搜索路径无效 |
-| `ERR_INVALID_PATH` | 指定目录路径无效 |
+| `ERR_INVALID_PATH` | 指定目录路径无效，或工作簿没有绝对保存路径 |
 | `ERR_OUTPUT_DIR` | 无法创建输出目录，或归档流程收到无效目录 |
-| `ERR_OUTPUT_PATH` | 输出文件名无效、路径逃出输出目录或本批次输出路径重复 |
+| `ERR_OUTPUT_PATH` | 输出文件名无效、税务 Word 公司名为空或非文本、路径越界或批内输出名重复 |
 | `ERR_NO_NAMED_RANGES` | 工商流程的当前工作表没有命名区域 |
 | `ERR_MIXED_RECORD_SHAPE` | 工商数据同时混用了列表字段和标量字段 |
 | `ERR_RECORD_DATA_TYPE` | 记录集输入不是映射 |
 | `ERR_RECORD_KEY_TYPE` | 记录集列名不是字符串 |
 | `ERR_RECORD_COLUMN_TYPE` | 记录集列值不是列表 |
 | `ERR_RECORD_LENGTH_MISMATCH` | 记录集各列长度不一致 |
-| `ERR_PERMISSION_DENIED` | 模板打开阶段捕获到权限异常，见上述延迟读取限制 |
+| `ERR_PERMISSION_DENIED` | 读取 Word 模板字节时遇到权限异常 |
 | `ERR_RUN_MAIN_FAILED` | Run main 捕获到未格式化异常 |
 | `ERR_ARCHIVE_PARTIAL` | 批量压缩失败或多个源文件对应同一压缩包 |
 
@@ -253,7 +252,7 @@ uv build
 
 `tests/` 覆盖记录转换、周期划分、模板搜索、命名区域、文件名预检、归档及入口行为；错误码测试还会校验 README 的错误码表与生产代码一致。涉及 Excel 的自动化测试大量使用替身，不能据此推断真实 COM、加载项或最终文档内容已全部验证。
 
-真实环境检查应使用工作簿副本，经过 Run main 执行，并核对输出内容和失败后的状态。已有真实运行验证覆盖普通工商、非法文件名、跨年个税压缩以及命名区域创建与恢复；上述 Word 内容和错误分类问题仍然存在。
+真实环境检查应使用工作簿副本，经过 Run main 执行，并核对输出内容和失败后的状态。已有真实运行验证覆盖普通工商、非法文件名、跨年个税压缩以及命名区域创建与恢复；2026-10-04 修复后使用独立合成工作簿完成 7 项真实加载项 Run main 验收：工商批量 Word、跨年个税、税务 Word、空公司名拒绝、命名区域创建、数字名称拒绝及报表分析。核验包括 Word 字段内容、ZIP 完整性、通过 Excel 回读包内 XLS、保存后的命名定义、报表输入及 Excel 计算结果。模板权限、保存与关闭双失败、注册表异常仍以自动化故障注入或替身验证，未声明真实环境穷尽覆盖。
 
 构建使用 Hatchling，生成 wheel 和源码包。wheel 包含 `sheetflow` Python 包及全部 19 个内置模板；顶层 `py_script/` 入口和业务输入工作簿需要另行配置。
 

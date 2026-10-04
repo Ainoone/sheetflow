@@ -88,7 +88,7 @@ def test_create_output_dir_for_workbook_creates_under_workbook_parent(tmp_path: 
     assert result.is_dir()
 
 
-def test_create_output_dir_for_workbook_raises_when_manager_returns_none(monkeypatch):
+def test_create_output_dir_for_workbook_raises_when_manager_returns_none(monkeypatch, tmp_path):
     class FakeManager:
         def __init__(self, path):
             self.path = path
@@ -99,7 +99,7 @@ def test_create_output_dir_for_workbook_raises_when_manager_returns_none(monkeyp
     monkeypatch.setattr(common, "SmartPathManager", FakeManager)
 
     with pytest.raises(RuntimeError) as exc_info:
-        create_output_dir_for_workbook(FakeWorkbook(Path("/tmp/book.xlsx")))
+        create_output_dir_for_workbook(FakeWorkbook(tmp_path / "book.xlsx"))
 
     message = str(exc_info.value)
     assert message.startswith("ERR_OUTPUT_DIR:")
